@@ -1,18 +1,21 @@
 name: deploy
+env:
+  IMAGE_NAME: app251125
 
 on:
   push:
     paths:
-      - '.github/workflows/**'
-      - 'src/**'
-      - 'build.gradle.kts'
-      - 'settings.gradle.kts'
-      - 'Dockerfile'
+      - ".github/workflows/**"
+      - "src/**"
+      - "build.gradle.kts"
+      - "Dockerfile"
     branches:
       - main
 
-env:
-  DOCKER_IMAGE_NAME: app250416 # 공통으로 설정해도 됨 (하지만 output도 병행)
+# 권한 최소화/명시화
+permissions:
+  contents: write # 태그/릴리즈
+  packages: write # GHCR 푸시
 
 jobs:
   makeTagAndRelease:
@@ -25,12 +28,12 @@ jobs:
         id: create_tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           tag_name: ${{ steps.create_tag.outputs.new_tag }}
           release_name: Release ${{ steps.create_tag.outputs.new_tag }}
@@ -47,21 +50,19 @@ jobs:
       image_name: ${{ steps.export_image.outputs.image_name }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: application-secret.yml 생성
+      - name: application-secret 추가
         env:
+          ACTIONS_STEP_DEBUG: true
           APPLICATION_SECRET: ${{ secrets.APPLICATION_SECRET }}
         run: echo "$APPLICATION_SECRET" > src/main/resources/application-secret.yml
-
       - name: Docker Buildx 설치
         uses: docker/setup-buildx-action@v2
-
       - name: 레지스트리 로그인
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
       - name: set lower case owner name
         id: export_owner
@@ -81,6 +82,7 @@ jobs:
           tags: |
             ghcr.io/${{ steps.export_owner.outputs.owner_lc }}/${{ steps.export_image.outputs.image_name }}:${{ needs.makeTagAndRelease.outputs.tag_name }},
             ghcr.io/${{ steps.export_owner.outputs.owner_lc }}/${{ steps.export_image.outputs.image_name }}:latest
+  
 
   deploy:
     runs-on: ubuntu-latest
@@ -93,7 +95,7 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          instance-ids: "i-097b759b696bcfd26"
+          instance-ids: "i-035b87d8497aeab83"
           working-directory: /
           comment: Deploy
           command: |
@@ -101,4 +103,4 @@ jobs:
             docker stop app1 2>/dev/null || true && \
             docker rm app1 2>/dev/null || true && \
             docker run -d --name app1 -p 8080:8080 ghcr.io/${{ needs.buildImageAndPush.outputs.owner_lc }}/${{ needs.buildImageAndPush.outputs.image_name }}:latest && \
-            docker rmi $(docker images -f "dangling=true" -q) || true
+            docker image prune -f
